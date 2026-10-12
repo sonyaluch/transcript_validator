@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Transcript Validator</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<style>
+:root{
+  --bg:#f6f5f2;--card:#fff;--ink:#1d1d1b;--muted:#6b6a66;--line:#e2e0da;
+  --accent:#2f5bd3;--ok:#1f7a4a;--warn:#a86400;--bad:#b3261e;--na:#5f5f5f;
+  --del-bg:#fbe3e1;--del:#9b1c14;--ins-bg:#dcf2e3;--ins:#155c35;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#161615;--card:#1f1f1e;--ink:#ecebe7;--muted:#9c9a94;--line:#33322f;
+  --accent:#7c9cff;--ok:#5cc98c;--warn:#e7a948;--bad:#f07a70;--na:#a0a0a0;
+  --del-bg:#4a1f1c;--del:#ffb4ab;--ins-bg:#173a26;--ins:#9be3b6;
+}}
+:root[data-theme="dark"]{
+  --bg:#161615;--card:#1f1f1e;--ink:#ecebe7;--muted:#9c9a94;--line:#33322f;
+  --accent:#7c9cff;--ok:#5cc98c;--warn:#e7a948;--bad:#f07a70;--na:#a0a0a0;
+  --del-bg:#4a1f1c;--del:#ffb4ab;--ins-bg:#173a26;--ins:#9be3b6;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,sans-serif}
+header{position:sticky;top:0;z-index:5;background:var(--card);border-bottom:1px solid var(--line);padding:10px 16px}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+h1{font-size:16px;margin:0 12px 0 0}
+button,.btn,select,input[type=number]{font:inherit;font-size:14px;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:7px;padding:5px 10px;cursor:pointer}
+.btn input{display:none}
+button:hover,.btn:hover{border-color:var(--accent)}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.spacer{flex:1}
+.progress{height:4px;background:var(--line);border-radius:2px;margin-top:8px;overflow:hidden}
+.progress>div{height:100%;background:var(--ok);width:0}
+.muted{color:var(--muted)}
+main{max-width:880px;margin:0 auto;padding:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:12px}
+.meta{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;color:var(--muted)}
+.meta b{color:var(--ink);font-weight:600}
+audio{width:100%;margin-top:10px}
+.audio-row{display:flex;gap:8px;align-items:center;margin-top:6px;font-size:13px}
+.label{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:0 0 6px}
+textarea{width:100%;min-height:150px;font:17px/1.6 Georgia,serif;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:12px;resize:vertical}
+textarea:focus{outline:2px solid var(--accent);outline-offset:-1px}
+.diff{font:16px/1.7 Georgia,serif}
+.diff del{background:var(--del-bg);color:var(--del);text-decoration:line-through;border-radius:3px;padding:0 2px}
+.diff ins{background:var(--ins-bg);color:var(--ins);text-decoration:none;border-radius:3px;padding:0 2px}
+.verdicts{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
+.verdicts button{text-align:left;padding:8px 10px}
+.verdicts button kbd{float:right;opacity:.6}
+.verdicts button.on[data-v="Accurate"]{background:var(--ok);border-color:var(--ok);color:#fff}
+.verdicts button.on[data-v="Minor errors"]{background:var(--warn);border-color:var(--warn);color:#fff}
+.verdicts button.on[data-v="Major errors"]{background:var(--bad);border-color:var(--bad);color:#fff}
+.verdicts button.on[data-v="Cannot verify"]{background:var(--na);border-color:var(--na);color:#fff}
+.tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.tags label{border:1px solid var(--line);border-radius:999px;padding:3px 10px;font-size:13px;cursor:pointer;user-select:none}
+.tags input{display:none}
+.tags label:has(input:checked){background:var(--accent);border-color:var(--accent);color:#fff}
+input.notes{width:100%;margin-top:10px;font:inherit;padding:7px 10px;border:1px solid var(--line);border-radius:7px;background:var(--bg);color:var(--ink)}
+.warn{background:var(--del-bg);color:var(--del);padding:8px 12px;border-radius:8px;margin-top:10px;font-size:14px}
+kbd{font:12px ui-monospace,monospace;border:1px solid var(--line);border-radius:4px;padding:0 4px}
+.keys{font-size:13px;color:var(--muted);line-height:2}
+#empty ol{line-height:1.9}
+</style>
+</head>
+<body>
+<header>
+  <div class="row">
+    <h1>Transcript Validator</h1>
+    <label class="btn">1. Load CSV<input type="file" id="csvIn" accept=".csv,text/csv"></label>
+    <label class="btn">2. Audio folder<input type="file" id="audioIn" webkitdirectory multiple></label>
+    <label class="btn" title="Select many audio files at once (Cmd+A in the picker)">or audio files<input type="file" id="audioFilesIn" multiple accept="audio/*,.oga,.ogg,.opus"></label>
+    <label class="btn" title="Restore progress from a previously exported results file">Import results<input type="file" id="resIn" accept=".csv"></label>
+    <span class="spacer"></span>
+    <button id="exportBtn" class="primary">Export results</button>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <select id="fFormat"><option value="Voice">Voice only</option><option value="">All formats</option></select>
+    <select id="fPid"><option value="">All participants</option></select>
+    <select id="fAudio"><option value="">With or without audio</option><option value="with">Has audio</option><option value="without">No audio loaded</option></select>
+    <select id="fStatus"><option value="">All</option><option value="todo">Unreviewed</option><option value="done">Reviewed</option><option value="flag">Errors flagged</option></select>
+    <span class="spacer"></span><span id="status" class="muted" style="font-size:13px"></span>
+    <button id="prev" title="Previous (P)">‹</button>
+    <input type="number" id="jump" min="1" style="width:70px">
+    <span class="muted" id="count">/ 0</span>
+    <button id="next" title="Next (N)">›</button>
+  </div>
+  <div class="progress"><div id="bar"></div></div>
+</header>
+
+<main>
+  <section id="empty" class="card">
+    <p><b>Nothing is uploaded.</b> Files stay in this browser.</p>
+    <ol>
+      <li>Load the transcript CSV. Voice entries are shown by default.</li>
+      <li>Optional: pick the folder of voice notes. Each file is matched to its entry by the <code>UniqueID</code> at the end of its name, e.g. <code>XY12345_Journal_…_AbCdEfGhIj.oga</code>. If the folder button doesn't work, use <b>or audio files</b> and select them all with Cmd+A, or drag the files onto the page.</li>
+      <li>Listen, fix the transcript in place, pick a verdict, and move on. Progress autosaves in this browser. Use <b>Export results</b> to keep a copy.</li>
+    </ol>
+  </section>
+
+  <section id="review" hidden>
+    <div class="card">
+      <div class="meta" id="meta"></div>
+      <audio id="player" controls preload="metadata"></audio>
+      <div class="audio-row">
+        <span class="muted" id="audioStatus"></span><span class="spacer"></span>
+        <span class="muted">Speed</span>
+        <select id="speed"><option>0.75</option><option selected>1</option><option>1.25</option><option>1.5</option></select>
+      </div>
+      <div id="emptyWarn"></div>
+    </div>
+
+    <div class="card">
+      <p class="label">Transcript (edit to match the audio)</p>
+      <textarea id="txt" spellcheck="false"></textarea>
+      <div class="row" style="margin-top:6px">
+        <button id="resetTxt">Reset to AI version</button>
+        <span class="spacer"></span>
+        <span class="muted" id="wer"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <p class="label">Your changes vs. AI transcript</p>
+      <div class="diff" id="diff"></div>
+    </div>
+
+    <div class="card">
+      <p class="label">Verdict</p>
+      <div class="verdicts" id="verdicts">
+        <button data-v="Accurate">Accurate <kbd>1</kbd></button>
+        <button data-v="Minor errors">Minor errors, same meaning <kbd>2</kbd></button>
+        <button data-v="Major errors">Major errors, meaning changed <kbd>3</kbd></button>
+        <button data-v="Cannot verify">Cannot verify <kbd>4</kbd></button>
+      </div>
+      <div class="tags" id="tags"></div>
+      <input class="notes" id="notes" placeholder="Notes (optional)">
+    </div>
+
+    <p class="keys">
+      <kbd>Esc</kbd> play/pause from anywhere (rewinds 1s on pause) ·
+      <kbd>Space</kbd> play/pause · <kbd>←</kbd><kbd>→</kbd> skip 3s ·
+      <kbd>1</kbd>–<kbd>4</kbd> verdict · <kbd>N</kbd>/<kbd>P</kbd> next/previous · <kbd>E</kbd> edit transcript
+    </p>
+  </section>
+</main>
+
+<script>
+const KEY = 'transcript-validator-v1';
+const TAGS = ['Misheard word','Omitted words','Added / hallucinated text','Names or terms wrong','Truncated','Punctuation / sentences','Filler words'];
+const $ = id => document.getElementById(id);
+let rows = [], view = [], idx = 0, audioFiles = [], audioKeys = new Set(), audioUrls = {}, state = {};
+try { state = JSON.parse(localStorage.getItem(KEY)) || {}; } catch { state = {}; }
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch {} };
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+$('tags').innerHTML = TAGS.map(t => `<label><input type="checkbox" value="${esc(t)}">${esc(t)}</label>`).join('');
+
+// ---------- text comparison ----------
+const tok = s => (s || '').trim().split(/\s+/).filter(Boolean);
+const norm = w => w.toLowerCase().replace(/[^\p{L}\p{N}']/gu, '');
+function wordDiff(a, b) {
+  const n = a.length, m = b.length, A = a.map(norm), B = b.map(norm);
+  const dp = Array.from({length: n + 1}, () => new Uint32Array(m + 1));
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--)
+    dp[i][j] = A[i] === B[j] ? dp[i+1][j+1] + 1 : Math.max(dp[i+1][j], dp[i][j+1]);
+  const out = []; let i = 0, j = 0;
+  while (i < n && j < m) {
+    if (A[i] === B[j]) { out.push(['=', b[j]]); i++; j++; }
+    else if (dp[i+1][j] >= dp[i][j+1]) out.push(['-', a[i++]]);
+    else out.push(['+', b[j++]]);
+  }
+  while (i < n) out.push(['-', a[i++]]);
+  while (j < m) out.push(['+', b[j++]]);
+  return out;
+}
+function wer(hyp, ref) {
+  const h = tok(hyp).map(norm).filter(Boolean), r = tok(ref).map(norm).filter(Boolean);
+  if (!r.length) return h.length ? 1 : 0;
+  let prev = Array.from({length: h.length + 1}, (_, j) => j);
+  for (let i = 1; i <= r.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= h.length; j++)
+      cur[j] = Math.min(prev[j] + 1, cur[j-1] + 1, prev[j-1] + (r[i-1] === h[j-1] ? 0 : 1));
+    prev = cur;
+  }
+  return prev[h.length] / r.length;
+}
+
+// ---------- loading ----------
+$('csvIn').onchange = e => { const f = e.target.files[0]; if (f) loadCsv(f); };
+function loadCsv(src) {
+  Papa.parse(src, {header: true, skipEmptyLines: true, complete: res => {
+    rows = res.data.filter(r => r.UniqueID);
+    // The export writes failed transcriptions as the literal text "null".
+    rows.forEach(r => { if (/^(null|nan|none)$/i.test((r.Content || '').trim())) r.Content = ''; });
+    rows.sort((a, b) => (a.ParticipantID || '').localeCompare(b.ParticipantID || '') || (a.Timestamp || '').localeCompare(b.Timestamp || ''));
+    const pids = [...new Set(rows.map(r => r.ParticipantID))].sort();
+    $('fPid').innerHTML = '<option value="">All participants</option>' + pids.map(p => `<option>${esc(p)}</option>`).join('');
+    if (audioKeys.size) $('fAudio').value = 'with';
+    applyFilters(true);
+  }});
+};
+// Audio files are named like XY12345_Journal_1234567890_1-1-2026_1767225600000_AbCdEfGhIj.oga;
+// the last "_" segment (minus extension) is the entry's UniqueID.
+const isAudio = f => /^audio\/|\.(m4a|mp3|wav|ogg|oga|webm|aac|opus|flac|amr|3gp)$/i.test(f.type + ' ' + f.name);
+const audioKey = name => name.replace(/\.[^.]+$/, '').split('_').pop();
+function addAudio(files) {
+  const added = files.filter(isAudio);
+  audioFiles.push(...added);
+  const ids = new Set(rows.map(r => r.UniqueID));
+  added.forEach(f => audioKeys.add(audioKey(f.name)));
+  const hit = added.filter(f => ids.has(audioKey(f.name))).length;
+  if (hit) { $('fAudio').value = 'with'; applyFilters(true); }
+  notify(`Added ${added.length} audio file${added.length === 1 ? '' : 's'}` + (rows.length ? `, ${hit} matched an entry in the CSV.` : '. Load the CSV to match them.'));
+  render();
+  return hit;
+}
+$('audioIn').onchange = e => addAudio([...e.target.files]);
+$('audioFilesIn').onchange = e => addAudio([...e.target.files]);
+document.addEventListener('dragover', e => e.preventDefault());
+document.addEventListener('drop', e => {
+  e.preventDefault();
+  const files = [...e.dataTransfer.files], r = view[idx];
+  const ids = new Set(rows.map(x => x.UniqueID));
+  if (files.some(f => ids.has(audioKey(f.name))) || files.length > 1) addAudio(files);
+  else if (files[0] && r) { audioUrls[r.UniqueID] = URL.createObjectURL(files[0]); render(); }
+});
+$('resIn').onchange = e => {
+  const f = e.target.files[0]; if (!f) return;
+  Papa.parse(f, {header: true, skipEmptyLines: true, complete: res => {
+    let n = 0;
+    for (const r of res.data) if (r.UniqueID && r.Verdict) {
+      state[r.UniqueID] = {verdict: r.Verdict, tags: r.ErrorTypes ? r.ErrorTypes.split('; ') : [],
+        corrected: r.Corrected_Transcript, notes: r.Notes || '', reviewedAt: r.ReviewedAt}; n++;
+    }
+    save(); applyFilters(); notify(`Restored ${n} reviewed entries.`);
+  }});
+};
+
+// ---------- filtering / nav ----------
+function status(id) { const s = state[id]; return !s?.verdict ? 'todo' : (s.verdict === 'Accurate' ? 'done' : 'flag'); }
+function applyFilters(reset) {
+  const cur = view[idx]?.UniqueID;
+  const fmt = $('fFormat').value, pid = $('fPid').value, st = $('fStatus').value, au = $('fAudio').value;
+  const hasAudio = r => audioKeys.has(r.UniqueID) || !!audioUrls[r.UniqueID];
+  view = rows.filter(r => (!fmt || r.EntryFormat === fmt) && (!pid || r.ParticipantID === pid) &&
+    (!au || (au === 'with') === hasAudio(r)) &&
+    (!st || (st === 'done' ? status(r.UniqueID) !== 'todo' : status(r.UniqueID) === st)));
+  const keep = view.findIndex(r => r.UniqueID === cur);
+  idx = reset ? Math.max(0, view.findIndex(r => status(r.UniqueID) === 'todo')) : (keep >= 0 ? keep : Math.min(idx, Math.max(0, view.length - 1)));
+  render();
+}
+['fFormat','fPid','fStatus','fAudio'].forEach(id => $(id).onchange = () => applyFilters());
+const go = d => { if (!view.length) return; idx = Math.max(0, Math.min(view.length - 1, idx + d)); render(); };
+$('prev').onclick = () => go(-1); $('next').onclick = () => go(1);
+$('jump').onchange = e => { idx = Math.max(0, Math.min(view.length - 1, (+e.target.value || 1) - 1)); render(); };
+
+// ---------- render ----------
+// When opened through validator_server.py, recordings stream from the SSH server instead.
+const remoteAudio = {};
+(async () => {
+  if (!/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) return;
+  try {
+    const res = await fetch('audio-list'); if (!res.ok) return;
+    const names = await res.json();
+    for (const n of names) { remoteAudio[audioKey(n)] = 'audio/' + encodeURIComponent(n); audioKeys.add(audioKey(n)); }
+    notify(`Connected to the server: ${names.length} recordings available.`);
+    const csv = await fetch('data.csv');
+    if (csv.ok) loadCsv(await csv.text()); else applyFilters();
+  } catch {}
+})();
+function audioFor(id) {
+  if (remoteAudio[id]) return remoteAudio[id];
+  if (audioUrls[id]) return audioUrls[id];
+  const f = audioFiles.find(f => audioKey(f.name) === id) || audioFiles.find(f => f.name.includes(id));
+  return f ? (audioUrls[id] = URL.createObjectURL(f)) : null;
+}
+function render() {
+  const has = view.length > 0;
+  $('empty').hidden = has; $('review').hidden = !has;
+  $('count').textContent = `/ ${view.length}`;
+  const done = view.filter(r => status(r.UniqueID) !== 'todo').length;
+  $('bar').style.width = has ? (100 * done / view.length) + '%' : 0;
+  if (!has) { if (rows.length) { $('empty').hidden = false; $('empty').innerHTML = '<p>No entries match these filters.</p>'; } return; }
+  const r = view[idx], s = state[r.UniqueID] || {};
+  $('jump').value = idx + 1;
+  $('meta').innerHTML = [['Participant', r.ParticipantID], ['When', r.Timestamp?.slice(0, 16)], ['Type', r.DataType],
+    ['Format', r.EntryFormat], ['Words', r.WordCount], ['ID', r.UniqueID], ['Reviewed', `${done}/${view.length}`]]
+    .map(([k, v]) => `<span>${k} <b>${esc(v)}</b></span>`).join('');
+
+  const url = audioFor(r.UniqueID), p = $('player');
+  if (url) { if (p.dataset.id !== r.UniqueID) { p.src = url; p.dataset.id = r.UniqueID; p.playbackRate = +$('speed').value; } }
+  else { p.removeAttribute('src'); p.dataset.id = ''; p.load(); }
+  $('audioStatus').textContent = url ? '' : (audioFiles.length ? `No audio file ending in "${r.UniqueID}" was loaded. Add it, or drop it onto the page.` : 'No audio loaded. Pick the audio folder or drop a file here.');
+  $('emptyWarn').innerHTML = !(r.Content || '').trim() ? '<div class="warn">The AI transcript is empty ("null" in the CSV). The transcription may have failed, or the recording may be silent. Type what you hear in the box below.</div>' : '';
+
+  $('txt').value = s.corrected ?? r.Content ?? '';
+  document.querySelectorAll('#verdicts button').forEach(b => b.classList.toggle('on', b.dataset.v === s.verdict));
+  document.querySelectorAll('#tags input').forEach(c => c.checked = (s.tags || []).includes(c.value));
+  $('notes').value = s.notes || '';
+  renderDiff();
+}
+function renderDiff() {
+  const r = view[idx]; if (!r) return;
+  const orig = r.Content || '', cur = $('txt').value;
+  const d = wordDiff(tok(orig), tok(cur));
+  const changed = d.some(([op]) => op !== '=');
+  $('diff').innerHTML = changed
+    ? d.map(([op, w]) => op === '=' ? esc(w) : op === '-' ? `<del>${esc(w)}</del>` : `<ins>${esc(w)}</ins>`).join(' ')
+    : '<span class="muted">No changes. The transcript is as the AI wrote it.</span>';
+  $('wer').textContent = changed ? `Word error rate: ${(100 * wer(orig, cur)).toFixed(1)}%` : '';
+}
+
+// ---------- editing ----------
+function upd(patch) {
+  const id = view[idx].UniqueID;
+  state[id] = {...(state[id] || {}), ...patch, reviewedAt: new Date().toISOString()};
+  save();
+}
+$('txt').oninput = () => { upd({corrected: $('txt').value}); renderDiff(); };
+$('resetTxt').onclick = () => { $('txt').value = view[idx].Content || ''; upd({corrected: undefined}); renderDiff(); };
+$('notes').oninput = () => upd({notes: $('notes').value});
+$('tags').onchange = () => upd({tags: [...document.querySelectorAll('#tags input:checked')].map(c => c.value)});
+function setVerdict(v) {
+  const cur = state[view[idx].UniqueID]?.verdict;
+  upd({verdict: cur === v ? undefined : v});
+  document.querySelectorAll('#verdicts button').forEach(b => b.classList.toggle('on', b.dataset.v === state[view[idx].UniqueID].verdict));
+  const done = view.filter(r => status(r.UniqueID) !== 'todo').length;
+  $('bar').style.width = (100 * done / view.length) + '%';
+}
+$('verdicts').onclick = e => { const b = e.target.closest('button'); if (b) setVerdict(b.dataset.v); };
+$('speed').onchange = () => $('player').playbackRate = +$('speed').value;
+
+// ---------- export ----------
+$('exportBtn').onclick = async () => {
+  if (!rows.length) return notify('Load the CSV first.');
+  const out = rows.filter(r => r.EntryFormat === 'Voice' || state[r.UniqueID]?.verdict).map(r => {
+    const s = state[r.UniqueID] || {}, corrected = s.corrected ?? r.Content ?? '';
+    return {UniqueID: r.UniqueID, ParticipantID: r.ParticipantID, Timestamp: r.Timestamp, DataType: r.DataType,
+      EntryFormat: r.EntryFormat, Verdict: s.verdict || '', ErrorTypes: (s.tags || []).join('; '),
+      WER: s.verdict ? wer(r.Content, corrected).toFixed(3) : '', AI_Transcript: r.Content || '',
+      Corrected_Transcript: corrected, Notes: s.notes || '', ReviewedAt: s.reviewedAt || ''};
+  });
+  const csv = Papa.unparse(out), filename = `transcript_validation_${new Date().toISOString().slice(0, 10)}.csv`;
+  const dl = window.claude?.use ? await window.claude.use('downloads') : null;
+  if (dl) {
+    try { await dl.save({filename, data: csv}); } catch (err) { if (err?.code !== 'declined') notify('Export failed: ' + (err?.message || err?.code)); }
+    return;
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], {type: 'text/csv'}));
+  a.download = filename;
+  a.click();
+};
+function notify(msg) { $('status').textContent = msg; }
+
+// ---------- keyboard ----------
+function togglePlay(rewind) {
+  const p = $('player'); if (!p.src) return;
+  if (p.paused) p.play(); else { p.pause(); if (rewind) p.currentTime = Math.max(0, p.currentTime - 1); }
+}
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { e.preventDefault(); togglePlay(true); return; }
+  if (/^(TEXTAREA|INPUT|SELECT)$/.test(e.target.tagName) || e.metaKey || e.ctrlKey || e.altKey || !view.length) return;
+  const p = $('player');
+  const k = e.key.toLowerCase();
+  if (k === ' ') { e.preventDefault(); togglePlay(); }
+  else if (k === 'arrowleft') p.currentTime = Math.max(0, p.currentTime - 3);
+  else if (k === 'arrowright') p.currentTime += 3;
+  else if (k === 'n') go(1);
+  else if (k === 'p') go(-1);
+  else if (k === 'e') { e.preventDefault(); $('txt').focus(); }
+  else if ('1234'.includes(k) && k) setVerdict(['Accurate','Minor errors','Major errors','Cannot verify'][+k - 1]);
+});
+render();
+</script>
+</body>
+</html>

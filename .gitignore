@@ -1,0 +1,16 @@
+# Never commit participant data or results
+*.csv
+*.tsv
+*.xlsx
+*.oga
+*.ogg
+*.opus
+*.m4a
+*.mp3
+*.wav
+*.webm
+*.aac
+*.flac
+*.amr
+*.3gp
+.DS_Store
